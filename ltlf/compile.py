@@ -1,0 +1,96 @@
+"""Compile spec YAML files to the DFA table cache. The only module that imports logaut, pylogics or sympy.
+
+Needs Lydia (lydia.bat -> Docker). Metadata is copied, not validated: DFAProtocol validates at load.
+
+Usage: python -m ltlf.compile [spec_dir] [out_json]
+"""
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+import yaml
+from logaut import ltl2dfa
+from pylogics.parsers import parse_ltl
+
+from ltlf.dfa import all_letters, letter_key
+
+MAX_ALPHABET = 8
+DEFAULT_SPECS = Path(".claude/ltlf/specs")
+DEFAULT_OUT = Path(".claude/ltlf/cache/index.json")
+
+
+def to_table(dfa) -> dict:
+    """pythomata DFA -> {alphabet, initial, accepting, table}, states renumbered with the initial state as 0.
+
+    Asks pythomata for the successor of every state on every letter, so guards are evaluated here once
+    and never at hook time. Letters are written as in ltlf.dfa.letter_key.
+    """
+    # shortcut: alphabet comes from guard free_symbols as in the original; an atom simplified out of every
+    # guard is dropped, which cannot affect a step.
+    atoms = set()
+    for q in dfa.states:                                  # every state
+        for _, g, _ in dfa.get_transitions_from(q):       # every outgoing edge (src, guard, dst)
+            for s in g.free_symbols:                      # every variable in that edge's guard
+                atoms.add(str(s))
+    alphabet = sorted(atoms)
+    if len(alphabet) > MAX_ALPHABET:
+        raise ValueError(f"alphabet has {len(alphabet)} propositions, max {MAX_ALPHABET}")
+    order = [dfa.initial_state] + sorted(q for q in dfa.states if q != dfa.initial_state)
+    index = {q: i for i, q in enumerate(order)}
+    table = []
+    for q in order:
+        row = {}
+        for letter in all_letters(alphabet):
+            succ = dfa.get_successor(q, {p: p in letter for p in alphabet})
+            if succ is None:
+                raise ValueError(f"DFA is partial: no successor from state {q} on letter {set(letter)}")
+            row[letter_key(letter)] = index[succ]
+        table.append(row)
+    return {
+        "alphabet": alphabet,
+        "initial": 0,
+        "accepting": sorted(index[q] for q in dfa.accepting_states),
+        "table": table,
+    }
+
+
+def compile_formula(formula: str) -> dict:
+    """Compile one LTLf formula with Lydia into the table form."""
+    return to_table(ltl2dfa(parse_ltl(formula), "lydia"))
+
+
+def compile_spec(path: Path) -> tuple[str, dict]:
+    """Read one spec YAML; return (name, cache entry with metadata, source hash and table)."""
+    raw = path.read_bytes()
+    spec = yaml.safe_load(raw)
+    entry = {k: spec.get(k) for k in ("class", "enforcement", "formula", "message")}
+    entry["source_sha256"] = hashlib.sha256(raw).hexdigest()
+    entry.update(compile_formula(spec["formula"]))
+    return spec["name"], entry
+
+
+def main(spec_dir: Path = DEFAULT_SPECS, out: Path = DEFAULT_OUT) -> int:
+    """Compile every spec in `spec_dir` into one cache file. On any failure return 1 and keep the old cache."""
+    index, failed = {}, 0
+    for path in sorted(spec_dir.glob("*.yaml")):
+        try:
+            name, entry = compile_spec(path)
+            if name in index:
+                raise ValueError(f"duplicate spec name {name!r}")
+            index[name] = entry
+            print(f"{path.name}: {len(entry['table'])} states, alphabet {entry['alphabet']}")
+        except Exception as e:  # report every bad spec, then fail
+            print(f"error: {path.name}: {e}", file=sys.stderr)
+            failed += 1
+    if failed:
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp")
+    tmp.write_text(json.dumps(index, indent=1), encoding="utf-8")
+    tmp.replace(out)  # readers never see a half-written cache
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(*map(Path, sys.argv[1:3])))
