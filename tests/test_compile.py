@@ -26,10 +26,10 @@ def test_f_x_table():
 @pytest.mark.parametrize("formula", ["F(x)", "F(a & F(b))", "!(G(!x))", "!(G !(a & F(b)))"])
 def test_round_trip(formula):
     from logaut import ltl2dfa
-    from pylogics.parsers import parse_ltl
 
     from ltlf.compile import to_table
 
+    parse_ltl = pytest.importorskip("pylogics.parsers").parse_ltl
     original = ltl2dfa(parse_ltl(formula), "lydia")
     table = DFA.from_dict(to_table(original))
     rng = random.Random(0)

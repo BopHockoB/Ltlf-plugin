@@ -15,6 +15,7 @@ from pylogics.parsers import parse_ltl
 
 from ltlf.dfa import all_letters, letter_key
 
+COMPILER_VERSION = 1  # bump when to_table or the cache format changes, so cached entries are never reused
 MAX_ALPHABET = 8
 DEFAULT_SPECS = Path(".claude/ltlf/specs")
 DEFAULT_OUT = Path(".claude/ltlf/cache/index.json")
@@ -60,26 +61,44 @@ def compile_formula(formula: str) -> dict:
     return to_table(ltl2dfa(parse_ltl(formula), "lydia"))
 
 
-def compile_spec(path: Path) -> tuple[str, dict]:
-    """Read one spec YAML; return (name, cache entry with metadata, source hash and table)."""
-    raw = path.read_bytes()
+def compile_spec(raw: bytes, cached: dict | None = None) -> tuple[str, dict, bool]:
+    """One spec YAML -> (name, cache entry, reused). Reuses `cached` if source and compiler are unchanged."""
     spec = yaml.safe_load(raw)
+    sha = hashlib.sha256(raw).hexdigest()
+    cached = (cached or {}).get(spec["name"])
+    if cached and cached.get("source_sha256") == sha and cached.get("compiler_version") == COMPILER_VERSION:
+        return spec["name"], cached, True
     entry = {k: spec.get(k) for k in ("class", "enforcement", "formula", "message")}
-    entry["source_sha256"] = hashlib.sha256(raw).hexdigest()
+    entry["source_sha256"] = sha
+    entry["compiler_version"] = COMPILER_VERSION
     entry.update(compile_formula(spec["formula"]))
-    return spec["name"], entry
+    return spec["name"], entry, False
+
+
+def _load_old(out: Path) -> dict:
+    """The previous cache, or {} if it is missing or unreadable (then everything recompiles)."""
+    try:
+        old = json.loads(out.read_text(encoding="utf-8"))
+        return old if isinstance(old, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def main(spec_dir: Path = DEFAULT_SPECS, out: Path = DEFAULT_OUT) -> int:
-    """Compile every spec in `spec_dir` into one cache file. On any failure return 1 and keep the old cache."""
-    index, failed = {}, 0
+    """Compile every spec in `spec_dir` into one cache file, reusing unchanged entries.
+
+    The index is rebuilt from the files present, so deleted specs drop out. On any failure return 1
+    and keep the old cache.
+    """
+    old, index, failed = _load_old(out), {}, 0
     for path in sorted(spec_dir.glob("*.yaml")):
         try:
-            name, entry = compile_spec(path)
+            name, entry, reused = compile_spec(path.read_bytes(), old)
             if name in index:
                 raise ValueError(f"duplicate spec name {name!r}")
             index[name] = entry
-            print(f"{path.name}: {len(entry['table'])} states, alphabet {entry['alphabet']}")
+            how = "reused" if reused else "compiled"
+            print(f"{path.name}: {how}, {len(entry['table'])} states, alphabet {entry['alphabet']}")
         except Exception as e:  # report every bad spec, then fail
             print(f"error: {path.name}: {e}", file=sys.stderr)
             failed += 1
