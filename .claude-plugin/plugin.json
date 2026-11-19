@@ -1,0 +1,9 @@
+{
+  "name": "ltlf",
+  "version": "0.1.0",
+  "description": "Blocks tool calls that violate LTLf safety specs, compiled ahead of time to DFAs.",
+  "author": {
+    "name": "BopHockoB",
+    "url": "https://github.com/BopHockoB"
+  }
+}

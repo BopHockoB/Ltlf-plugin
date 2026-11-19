@@ -90,6 +90,8 @@ def main(spec_dir: Path = DEFAULT_SPECS, out: Path = DEFAULT_OUT) -> int:
     The index is rebuilt from the files present, so deleted specs drop out. On any failure return 1
     and keep the old cache.
     """
+    if out.is_dir():  # given the cache folder rather than the file
+        out = out / "index.json"
     old, index, failed = _load_old(out), {}, 0
     for path in sorted(spec_dir.glob("*.yaml")):
         try:

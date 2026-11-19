@@ -19,8 +19,6 @@ PHASES = ("pre", "post")
 # A tool name, or a function of one event returning a bool (or an awaitable of one).
 Rule = str | Callable[[Mapping], Any]
 
-# TODO: Tool-name rules read event["tool"]. That field isn't produced by anything yet, because the event normaliser is still incomplete. The normaliser should add it, or the rules should be changed to read event["tool_name"] instead.
-
 class LabelRegistry:
     """Maps LTLf atomic propositions to predicates over one tool call event."""
 

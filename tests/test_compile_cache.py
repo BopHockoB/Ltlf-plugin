@@ -47,3 +47,11 @@ def test_unreadable_old_cache_recompiles(tmp_path, calls):
     out.write_text("{half", encoding="utf-8")
     assert comp.main(specs, out) == 0 and len(calls) == 1
     assert json.loads(out.read_text())["a"]["compiler_version"] == comp.COMPILER_VERSION
+
+
+def test_out_may_be_the_cache_folder(tmp_path, calls):
+    specs, cache = tmp_path / "specs", tmp_path / "cache"
+    specs.mkdir()
+    cache.mkdir()
+    write_spec(specs, "a")
+    assert comp.main(specs, cache) == 0 and "a" in json.loads((cache / "index.json").read_text())

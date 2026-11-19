@@ -3,6 +3,7 @@
 The replay drives it over a whole trace; the PreToolUse hook builds a fresh instance and calls pre() once,
 which is exactly the stateless deny check, so hook and replay share one code path.
 """
+import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -55,6 +56,18 @@ class Report:
     entries: list[Entry]
     denied: list[Any]
     final: dict[str, bool]
+
+
+def load_cache(ltlf_dir: Path) -> dict:
+    """`ltlf_dir/cache/index.json`, checked against `ltlf_dir/specs/*.yaml` by sha256 (no YAML parsing).
+
+    Raises RuntimeError if any spec was added, edited or removed since the last compile.
+    """
+    index = json.loads((ltlf_dir / "cache" / "index.json").read_text(encoding="utf-8"))
+    specs = {hashlib.sha256(p.read_bytes()).hexdigest() for p in (ltlf_dir / "specs").glob("*.yaml")}
+    if specs != {entry.get("source_sha256") for entry in index.values()}:
+        raise RuntimeError("stale cache: spec files changed since the last `python -m ltlf.compile`")
+    return index
 
 
 def load_monitor(name: str, entry: Mapping, registry: LabelRegistry) -> Monitor:
