@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ltlf",
+  "description": "LTLf DFA action-blocking controller for Claude Code.",
+  "owner": {
+    "name": "BopHockoB",
+    "url": "https://github.com/BopHockoB"
+  },
+  "plugins": [
+    {
+      "name": "ltlf",
+      "description": "Blocks tool calls that violate LTLf safety specs, compiled ahead of time to DFAs.",
+      "source": "./",
+      "category": "security"
+    }
+  ]
+}
